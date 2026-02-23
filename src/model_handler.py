@@ -71,3 +71,27 @@ class ModelHandler:
         """
         return self.get_model() is not None
 
+    def get_feature_importance(self):
+        """
+        Extract feature importances from the model (works for tree-based & linear models).
+
+        Returns:
+            Dict mapping feature name -> importance score, or None if unavailable
+        """
+        from .config import EXPECTED_FEATURES
+        model = self.get_model()
+        if model is None:
+            return None
+        try:
+            # Tree-based models (RandomForest, GradientBoosting, XGBoost, etc.)
+            importances = model.feature_importances_
+            return dict(zip(EXPECTED_FEATURES, importances.tolist()))
+        except AttributeError:
+            pass
+        try:
+            # Linear models (LogisticRegression, SVM, etc.)
+            importances = abs(model.coef_[0])
+            return dict(zip(EXPECTED_FEATURES, importances.tolist()))
+        except AttributeError:
+            return None
+

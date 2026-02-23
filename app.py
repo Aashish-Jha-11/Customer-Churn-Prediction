@@ -41,7 +41,9 @@ if not model_handler.is_model_loaded():
 
 # Render UI
 UIComponents.render_page_header()
-app_mode = UIComponents.render_sidebar()
+app_mode = UIComponents.render_sidebar(
+    feature_importance=model_handler.get_feature_importance()
+)
 
 # ==================== SINGLE PREDICTION MODE ====================
 if app_mode == "Single Prediction":

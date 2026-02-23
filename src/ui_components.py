@@ -5,7 +5,7 @@ Reusable Streamlit UI components
 
 import streamlit as st
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from .config import CONSTRAINTS, CONTRACT_LENGTH_OPTIONS
 from .data_processor import DataProcessor
@@ -24,16 +24,49 @@ class UIComponents:
         """)
     
     @staticmethod
-    def render_sidebar() -> str:
+    def render_sidebar(feature_importance: Optional[dict] = None) -> str:
         """
-        Render sidebar navigation
-        
+        Render sidebar navigation and optional feature importance chart.
+
         Returns:
             Selected app mode
         """
         st.sidebar.header("Navigation")
-        app_mode = st.sidebar.selectbox("Choose Mode", 
+        app_mode = st.sidebar.selectbox("Choose Mode",
                                          ["Single Prediction", "Batch Prediction"])
+
+        # Feature Importance Section
+        st.sidebar.markdown("---")
+        st.sidebar.header("Model Feature Importance")
+        if feature_importance:
+            # Collapse one-hot encoded contract length back to a single 'Contract Length' score
+            contract_score = max(
+                feature_importance.get('Contract Length_Annual', 0),
+                feature_importance.get('Contract Length_Monthly', 0),
+                feature_importance.get('Contract Length_Quarterly', 0)
+            )
+            display_importance = {
+                'Support Calls': feature_importance.get('Support Calls', 0),
+                'Payment Delay': feature_importance.get('Payment Delay', 0),
+                'Total Spend': feature_importance.get('Total Spend', 0),
+                'Contract Length': contract_score,
+            }
+            total = sum(display_importance.values()) or 1
+            display_importance = {k: round(v / total * 100, 1) for k, v in display_importance.items()}
+
+            fi_df = pd.DataFrame(
+                list(display_importance.items()),
+                columns=['Feature', 'Importance (%)']
+            ).sort_values('Importance (%)', ascending=False)
+
+            st.sidebar.dataframe(fi_df.set_index('Feature'), use_container_width=True)
+            st.sidebar.bar_chart(fi_df.set_index('Feature'))
+            st.sidebar.caption(
+                "Importance shows each feature's relative influence on the model's prediction."
+            )
+        else:
+            st.sidebar.info("Feature importance unavailable for this model type.")
+
         return app_mode
     
     @staticmethod
@@ -114,7 +147,7 @@ class UIComponents:
             st.error("High Risk: This customer is likely to churn. Consider retention strategies!")
         else:
             st.success("Low Risk: This customer is likely to stay.")
-        
+
         # Probability bar chart
         st.write("### Probability Breakdown")
         prob_df = pd.DataFrame({
@@ -122,6 +155,28 @@ class UIComponents:
             'Probability': [retention_prob_pct, churn_prob_pct]
         })
         st.bar_chart(prob_df.set_index('Outcome'))
+
+        # Churn Reasons
+        reasons = result.get('churn_reasons', [])
+        if reasons:
+            st.write("### Potential Churn Reasons")
+            if result['is_high_risk']:
+                st.write(
+                    "Here are the key risk factors contributing to this customer's churn risk:"
+                )
+            else:
+                st.write(
+                    "While this customer is low-risk, monitor these factors:"
+                )
+
+            severity_colors = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}
+            for item in reasons:
+                icon = severity_colors.get(item['severity'], '⚪')
+                with st.container(border=True):
+                    st.markdown(f"**{icon} {item['reason']}**")
+                    st.caption(item['detail'])
+        elif result['is_high_risk']:
+            st.info("No specific dominant risk factors detected — ensemble of inputs led to this prediction.")
     
     @staticmethod
     def render_batch_prediction_results(results_df: pd.DataFrame, summary: Dict[str, Any]):
