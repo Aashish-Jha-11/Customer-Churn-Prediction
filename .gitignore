@@ -20,4 +20,23 @@ env/
 .DS_Store
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/
+
+# Env
+.env
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
