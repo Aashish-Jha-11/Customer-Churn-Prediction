@@ -31,7 +31,12 @@ CONTRACT_LENGTH_OPTIONS = ["Monthly", "Quarterly", "Annual"]
 # UI Configuration
 PAGE_TITLE = "Customer Churn Prediction"
 PAGE_ICON = "chart_with_upwards_trend"
-APP_MODES = ["Single Prediction", "Batch Prediction"]
+APP_MODES = [
+    "Single Prediction",
+    "Batch Prediction",
+    "Retention Report",
+    "Analytics Dashboard",
+]
 
 # Input Constraints
 CONSTRAINTS = {
@@ -58,3 +63,7 @@ CONSTRAINTS = {
 
 # Prediction Thresholds
 CHURN_THRESHOLD = 0.5  # 50% probability
+
+# Agent / RAG Configuration
+RAG_TOP_K = 5
+RISK_THRESHOLDS = {"high": 0.7, "medium": 0.4}

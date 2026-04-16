@@ -7,7 +7,7 @@ import streamlit as st
 import pandas as pd
 from typing import Dict, Any, Optional
 
-from .config import CONSTRAINTS, CONTRACT_LENGTH_OPTIONS
+from .config import CONSTRAINTS, CONTRACT_LENGTH_OPTIONS, APP_MODES
 from .data_processor import DataProcessor
 
 
@@ -32,8 +32,7 @@ class UIComponents:
             Selected app mode
         """
         st.sidebar.header("Navigation")
-        app_mode = st.sidebar.selectbox("Choose Mode",
-                                         ["Single Prediction", "Batch Prediction"])
+        app_mode = st.sidebar.selectbox("Choose Mode", APP_MODES)
 
         # Feature Importance Section
         st.sidebar.markdown("---")
@@ -231,6 +230,58 @@ class UIComponents:
                 percentage = (value / len(results_df)) * 100
                 st.write(f"- {idx}: {value} customers ({percentage:.1f}%)")
     
+    @staticmethod
+    def render_retention_report(report):
+        tier = report.get("risk_tier", "medium")
+        prob = report.get("churn_probability", 0.0)
+        tier_map = {
+            "high": ("🔴 High Risk", "error"),
+            "medium": ("🟡 Medium Risk", "warning"),
+            "low": ("🟢 Low Risk", "success"),
+        }
+        label, banner = tier_map.get(tier, ("Medium Risk", "warning"))
+
+        st.subheader("Risk Summary")
+        getattr(st, banner)(f"{label} — Churn probability: {prob*100:.1f}%")
+        st.write(report.get("risk_summary", ""))
+
+        if report.get("used_fallback"):
+            st.info("Language model was unavailable, so a rule-based fallback report was generated.")
+
+        factors = report.get("factors") or []
+        if factors:
+            st.subheader("Key Factors")
+            icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+            for f in factors:
+                icon = icons.get(f.get("severity"), "⚪")
+                with st.container(border=True):
+                    st.markdown(f"**{icon} {f.get('name', '')}**")
+                    st.caption(f.get("evidence", ""))
+
+        recs = report.get("recommendations") or []
+        if recs:
+            st.subheader("Recommended Retention Actions")
+            for i, r in enumerate(recs, 1):
+                with st.expander(f"{i}. {r.get('action', '')}", expanded=(i == 1)):
+                    st.markdown(f"**Why:** {r.get('rationale', '')}")
+                    st.markdown(f"**Expected impact:** {r.get('expected_impact', '')}")
+                    st.markdown(f"**Timeframe:** {r.get('timeframe', '')}")
+
+        sources = report.get("sources") or []
+        if sources:
+            st.subheader("Supporting Sources")
+            for s in sources:
+                st.markdown(f"- `{s['source']}` — {s['section']}")
+
+        note = report.get("confidence_note")
+        if note:
+            st.caption(f"Confidence note: {note}")
+
+        disclaimer = report.get("disclaimer")
+        if disclaimer:
+            st.markdown("---")
+            st.caption(disclaimer)
+
     @staticmethod
     def render_csv_format_info():
         """Display expected CSV format information"""
