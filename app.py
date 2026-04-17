@@ -10,6 +10,9 @@ from src.config import PAGE_TITLE, PAGE_ICON
 from src.model_handler import ModelHandler
 from src.predictor import ChurnPredictor
 from src.ui_components import UIComponents
+from src.agent.graph import run_agent
+from src.report.pdf import build_pdf
+from src.dashboard import analytics
 
 # Page configuration
 st.set_page_config(
@@ -117,6 +120,68 @@ elif app_mode == "Batch Prediction":
         except Exception as e:
             st.error(f"Error reading file: {str(e)}")
             st.write("Please make sure you uploaded a valid CSV file.")
+
+# ==================== RETENTION REPORT MODE ====================
+elif app_mode == "Retention Report":
+    st.header("Agentic Retention Report")
+    st.write("Get an AI-generated retention plan with supporting sources for a single customer.")
+
+    inputs = UIComponents.render_single_input_form()
+
+    st.write("---")
+
+    if st.button("Generate Retention Plan", type="primary", use_container_width=True):
+        with st.spinner("Running prediction and retrieving retention playbook..."):
+            try:
+                result = predictor.predict_single(
+                    total_spend=inputs['total_spend'],
+                    support_calls=inputs['support_calls'],
+                    payment_delay=inputs['payment_delay'],
+                    contract_length=inputs['contract_length']
+                )
+                report = run_agent(inputs, result)
+                st.session_state['last_report'] = report
+                st.session_state['last_customer'] = inputs
+            except Exception as e:
+                st.error(f"Error generating retention plan: {str(e)}")
+
+    if 'last_report' in st.session_state:
+        UIComponents.render_retention_report(st.session_state['last_report'])
+        try:
+            pdf_bytes = build_pdf(st.session_state['last_report'], st.session_state['last_customer'])
+            st.download_button(
+                "Download PDF Report",
+                data=pdf_bytes,
+                file_name="retention_report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.warning(f"Could not build PDF: {e}")
+
+# ==================== ANALYTICS DASHBOARD MODE ====================
+elif app_mode == "Analytics Dashboard":
+    st.header("Batch Analytics Dashboard")
+    st.write("Upload a customer CSV to see portfolio-level churn analytics and at-risk segments.")
+
+    UIComponents.render_csv_format_info()
+
+    uploaded_file = st.file_uploader("Choose a CSV file", type=['csv'], key="dashboard_upload")
+
+    if uploaded_file is not None:
+        try:
+            data = pd.read_csv(uploaded_file)
+            st.write(f"**Total Records:** {len(data)}")
+
+            if st.button("Run Analytics", type="primary", use_container_width=True):
+                with st.spinner("Scoring customers..."):
+                    results_df = predictor.predict_batch(data)
+                    st.session_state['analytics_df'] = results_df
+
+            if 'analytics_df' in st.session_state:
+                analytics.render(st.session_state['analytics_df'])
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
 
 # Footer
 UIComponents.render_footer()
