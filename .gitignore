@@ -40,3 +40,7 @@ env/
 *.nav
 *.snm
 *.vrb
+
+# Local-only project artifacts (not part of the public repo)
+report_latex/
+EXPLANATION.md
