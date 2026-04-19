@@ -1,0 +1,186 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{cite}
+
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue, citecolor=blue}
+
+\begin{document}
+
+\title{Agentic AI Retention Strategy Assistant for Customer Churn}
+
+\author{
+\IEEEauthorblockN{Aashish Jha, Manthan Shubash Ziman, Uzair Ahmed Shah, Jagadish Ishwar Patil}
+\IEEEauthorblockA{Newton School of Technology, ADYPU}
+}
+
+\maketitle
+
+\begin{abstract}
+This paper presents an agentic retention strategy assistant built on top of an existing churn prediction model. The assistant reasons about each customer's churn risk, retrieves relevant retention best practices from a curated knowledge base using Retrieval Augmented Generation, and calls a free tier Llama 3.3 70B model served through Groq to produce a structured retention report. The workflow is implemented as a LangGraph state machine with an explicit fallback path that keeps the system useful when the language model is unavailable. Reports can be downloaded as styled PDFs and a portfolio level analytics dashboard is provided for batch input. The complete application is deployed publicly on Streamlit Community Cloud using only free tier services.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Agentic AI, LangGraph, Retrieval Augmented Generation, Large Language Models, Customer Retention, Streamlit
+\end{IEEEkeywords}
+
+\section{Introduction}
+Predicting which customers will churn is only half of the problem. Translating a prediction into a concrete retention action is where most organisations struggle. This project extends a previously built churn classifier with an agentic retention assistant that explains why a customer is at risk and generates practical, evidence backed retention recommendations. The contribution of this paper is the Milestone 2 system: the agent design, the retrieval layer, the language model integration, the reporting surface and the public deployment.
+
+\section{Objectives}
+\begin{itemize}
+    \setlength{\itemsep}{2pt}
+    \item Design an agentic workflow with explicit state management that consumes a churn probability and produces a structured retention report.
+    \item Ground every recommendation in a curated retention corpus through retrieval augmented generation.
+    \item Use only free tier language model and hosting services.
+    \item Handle language model failure and missing data gracefully through a deterministic fallback.
+    \item Expose the assistant through an interactive interface with PDF export and a batch analytics dashboard.
+\end{itemize}
+
+\section{System Architecture}
+The Milestone 2 system has four collaborating components, illustrated in Fig.~\ref{fig:arch}:
+\begin{enumerate}
+    \item A churn classifier (inherited from Milestone 1) that returns a probability for each customer.
+    \item A retrieval layer built on FAISS and sentence transformer embeddings over a curated retention playbook corpus.
+    \item A LangGraph agent that orchestrates classification, retrieval, language model generation and a deterministic fallback.
+    \item A Streamlit user interface with four modes including the new Retention Report and Analytics Dashboard.
+\end{enumerate}
+
+\begin{figure}[!h]
+\centering
+\fbox{\parbox{0.92\columnwidth}{\centering
+UI \(\rightarrow\) Churn Classifier \(\rightarrow\) LangGraph Agent \\
+\(\rightarrow\) FAISS Retrieval \(\rightarrow\) Groq Llama 3.3 70B \\
+\(\rightarrow\) Structured Report \(\rightarrow\) PDF / Dashboard}}
+\caption{Milestone 2 system flow.}
+\label{fig:arch}
+\end{figure}
+
+\section{Retrieval Augmented Generation}
+Six markdown playbooks were authored, covering churn drivers, support interventions, payment recovery, contract upgrades, loyalty and winback, and segmentation. Each file is split into small chunks by heading. Chunks are encoded using the all-MiniLM-L6-v2 sentence transformer~\cite{reimers2019} (384 dimensional vectors, L2 normalised) and indexed in a FAISS IndexFlatIP~\cite{johnson2019}. At query time the top five chunks are retrieved and passed to the language model along with their source filename and section heading, so that the final report can cite them.
+
+A FlatIP index is used because the corpus is small and exact search is fast enough. The prebuilt index is committed to the repository so that cold deployments do not spend time rebuilding embeddings.
+
+\section{Agentic Workflow}
+The agent is implemented as a LangGraph~\cite{langgraph} StateGraph over a single TypedDict that carries the customer inputs, the classifier output, the derived risk tier, the retrieval query, the retrieved chunks, the final report and an error flag used for routing. The graph is shown in Fig.~\ref{fig:graph} and its nodes are described below.
+
+\begin{figure}[!h]
+\centering
+\fbox{\parbox{0.92\columnwidth}{\centering
+\texttt{classify\_risk} \(\rightarrow\) \texttt{build\_query} \(\rightarrow\) \texttt{retrieve\_context} \\[2pt]
+\(\rightarrow\) (on error) \texttt{fallback\_report} \(\rightarrow\) END \\[2pt]
+\(\rightarrow\) \texttt{generate\_strategy} \\[2pt]
+\(\rightarrow\) (on error) \texttt{fallback\_report} \(\rightarrow\) END \\[2pt]
+\(\rightarrow\) \texttt{compose\_report} \(\rightarrow\) END}}
+\caption{LangGraph state machine with conditional fallback.}
+\label{fig:graph}
+\end{figure}
+
+\begin{itemize}
+    \setlength{\itemsep}{3pt}
+    \item \texttt{classify\_risk} \\ buckets the churn probability into high (\(\geq 0.7\)), medium (\([0.4, 0.7)\)) or low.
+    \item \texttt{build\_query} \\ composes a retrieval query from the top churn reasons, the risk tier and the contract type.
+    \item \texttt{retrieve\_context} \\ performs FAISS similarity search and sets an error flag on failure.
+    \item \texttt{generate\_strategy} \\ prompts the language model in JSON mode with the prediction facts and retrieved snippets.
+    \item \texttt{compose\_report} \\ merges the language model output with source citations and a static disclaimer.
+    \item \texttt{fallback\_report} \\ deterministic rule based report invoked on any upstream failure.
+\end{itemize}
+
+The two conditional edges, one after retrieval and one after generation, route to the fallback node whenever the error flag is set. This makes the system robust against free tier rate limits, transient API failures and missing or noisy customer inputs.
+
+\section{Language Model Integration}
+Groq's free tier serves Llama 3.3 70B with very low latency. The client is called with JSON response mode so that the model returns a well formed object containing the risk summary, contributing factors, recommendations and a confidence note. The API key is read from Streamlit secrets with an environment variable fallback so that local development continues to work.
+
+To reduce hallucination the system prompt instructs the model to ground its advice in the provided snippets and not to invent statistics. Citations and the static ethical disclaimer are attached by the agent after the model returns, which prevents the model from fabricating sources.
+
+\section{Structured Retention Report}
+Every generated report contains the following sections:
+\begin{itemize}
+    \item Risk summary with tier and churn probability.
+    \item Contributing factors with severity.
+    \item Three to five recommended retention actions, each with rationale, expected impact and timeframe.
+    \item Supporting sources drawn from the retrieved corpus chunks.
+    \item A confidence note and an ethical disclaimer.
+\end{itemize}
+
+\section{PDF Export}
+The report can be downloaded as a styled PDF produced with ReportLab. The layout includes a colour coded risk banner, a customer snapshot table, a factor list with severity tags, a numbered list of recommendations, a sources block and a disclaimer footer.
+
+\section{Analytics Dashboard}
+A Plotly based batch dashboard is available from the Analytics Dashboard mode. Given an uploaded CSV the following views are rendered:
+\begin{itemize}
+    \item KPI cards for customer count, predicted churners, churn rate and average churn probability.
+    \item Churn probability histogram with a threshold line at fifty percent.
+    \item Risk tier donut chart.
+    \item Churn rate grouped by contract length.
+    \item Spend versus support calls scatter coloured by churn probability.
+    \item Value versus risk segmentation heatmap that highlights the high value at risk cohort.
+    \item Top twenty at risk customers table with CSV export.
+\end{itemize}
+
+\section{User Interface}
+The Streamlit sidebar exposes four modes: Single Prediction, Batch Prediction, Retention Report and Analytics Dashboard. The first two modes are inherited from Milestone 1 unchanged. The Retention Report mode reuses the existing single customer form, invokes the agent with a spinner and renders the structured report together with a download button for the PDF. The Analytics Dashboard mode reuses the CSV uploader and delegates rendering to the Plotly dashboard module.
+
+\section{Deployment}
+The application is deployed on Streamlit Community Cloud. Deployment configuration consists of \texttt{runtime.txt} to pin Python 3.11 for a stable faiss-cpu wheel, an empty \texttt{packages.txt}, a public GitHub repository and a \texttt{GROQ\_API\_KEY} entry in the Streamlit secrets panel. The prebuilt FAISS index is committed to the repository so that the first render of the Retention Report is fast.
+
+\section{Evaluation}
+
+\subsection{Schema Conformance}
+An offline smoke test was written that runs the agent end to end with a mocked language model and a mocked retriever, so it consumes no API quota. Three customer profiles, covering low, medium and high churn probability, were executed. In every case the final report contained the required keys (risk summary, factors, recommendations, sources and disclaimer) and the risk tier matched the expected bucket.
+
+\subsection{Fallback Coverage}
+A fourth test case forced the language model wrapper to return nothing, which exercised the conditional fallback edge. The final report was still schema complete and was correctly flagged as generated from the fallback path. This confirms that a free tier outage does not break the user experience.
+
+\subsection{Latency}
+End to end latency for a single retention report is dominated by the Groq API call and typically stays below ten seconds on the hosted app. Retrieval latency over a few hundred corpus chunks stays below two hundred milliseconds.
+
+\section{Discussion}
+Layering an agentic workflow on top of a well behaved classifier is a low cost way to turn churn probabilities into actionable advice without retraining the model. Retrieval augmented generation keeps the language model grounded in a small and auditable corpus. The deterministic fallback path removes the operational risk of depending on a free tier API and satisfies the project requirement to handle noisy or missing data gracefully.
+
+Prompting in JSON mode and attaching the citations after the model returns were the two most effective steps for reducing hallucination. Committing the prebuilt FAISS index to the repository removed a noticeable cold start latency on Streamlit Cloud.
+
+\section{Limitations and Ethical Considerations}
+The retention corpus is small and deliberately curated. This constrains the breadth of recommendations but also keeps the model grounded in material that has been reviewed. The language model is treated as a decision support tool rather than an autonomous actor; every generated report carries a visible disclaimer stating that the recommendations are suggestions and must be reviewed by a human retention specialist before action. The free tier language model has rate limits and may occasionally misformat output; the fallback path addresses both cases.
+
+\section{Conclusion}
+This Milestone 2 report presented an agentic retention strategy assistant that consumes a churn probability and produces a structured, source backed retention report. The assistant is implemented as a LangGraph state machine with explicit state management and a conditional fallback, uses retrieval augmented generation over a curated retention corpus, calls a free tier Llama 3.3 70B model through Groq, and exposes a PDF export and a portfolio level analytics dashboard. The full system is deployed publicly using only free services. Future work may incorporate real time product usage signals, human in the loop approval before any automated customer action and evaluation of language model recommendations against a labelled panel of retention experts.
+
+\begin{thebibliography}{9}
+\bibitem{reichheld2014} F. F. Reichheld, \emph{The Loyalty Effect}, Harvard Business Review Press, 2014.
+\bibitem{gartner2023} Gartner, \emph{CX Trends Report 2023}, 2023.
+\bibitem{johnson2019} J. Johnson, M. Douze and H. J\'egou, ``Billion-scale similarity search with GPUs,'' \emph{IEEE Transactions on Big Data}, 2019.
+\bibitem{reimers2019} N. Reimers and I. Gurevych, ``Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks,'' \emph{EMNLP}, 2019.
+\bibitem{langgraph} LangChain, \emph{LangGraph Documentation}, \url{https://langchain-ai.github.io/langgraph/}, accessed 2026.
+\bibitem{groqdocs} Groq, \emph{Groq API Documentation}, \url{https://console.groq.com/docs}, accessed 2026.
+\bibitem{bain} Bain \& Company, \emph{Customer Loyalty Playbook}, 2022.
+\bibitem{profitwell} ProfitWell, \emph{Retention Benchmarks Report}, 2023.
+\end{thebibliography}
+
+\appendix
+
+\section*{Appendix: Repository}
+The complete implementation, including the retention corpus, the FAISS index, the agent code, the PDF report builder, the analytics dashboard and the offline smoke test, is available at:
+
+\begin{center}
+\url{https://github.com/Aashish-Jha-11/Customer-Churn-Prediction}
+\end{center}
+
+\subsection*{Key Components}
+\begin{itemize}
+    \item \textbf{app.py}: Streamlit entry point with the four app modes.
+    \item \textbf{src/agent/}: LangGraph state, nodes, prompts, Groq client and compiled graph.
+    \item \textbf{src/rag/}: Retention corpus, FAISS index builder and cached retriever.
+    \item \textbf{src/report/}: ReportLab PDF builder.
+    \item \textbf{src/dashboard/}: Plotly analytics dashboard.
+    \item \textbf{tests/}: Offline smoke test that exercises the agent without calling any external API.
+\end{itemize}
+
+\end{document}
