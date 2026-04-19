@@ -1,41 +1,45 @@
-# Customer Churn Prediction & Agentic Retention Assistant
+# Customer Churn Prediction and Retention Assistant
 
-A web application that predicts customer churn with a Random Forest model and then uses an **agentic LLM workflow** (LangGraph + Groq Llama 3.3 70B + FAISS RAG) to generate structured, source-backed retention recommendations. Built with Streamlit.
+A Streamlit app that predicts whether a customer will churn and also generates
+a short retention plan for each customer. The churn prediction uses a Random
+Forest model trained on the Kaggle customer churn dataset. The retention plan
+is produced by a small agent that retrieves relevant notes from a local
+knowledge base and asks the Groq Llama 3.3 70B model (free tier) to write the
+final report.
 
-See [EXPLANATION.md](EXPLANATION.md) for a component-by-component walkthrough.
+## What you can do in the app
 
-## Features
+There are four modes in the sidebar:
 
-- **Single Prediction** — enter one customer's details, get churn probability + rule-based reasons.
-- **Batch Prediction** — upload a CSV, get predictions for the whole file, download as CSV.
-- **Retention Report (NEW)** — agentic workflow produces a structured retention plan with sources; export as PDF.
-- **Analytics Dashboard (NEW)** — portfolio-level Plotly charts, risk tiers, value-vs-risk segmentation.
+1. Single Prediction: fill the form, get churn probability and the top reasons.
+2. Batch Prediction: upload a CSV, download predictions as CSV.
+3. Retention Report: fill the form, get an AI generated retention plan with
+   sources, and download it as a PDF.
+4. Analytics Dashboard: upload a CSV and see churn rate, risk tiers, a spend
+   vs support scatter and a value vs risk segmentation.
 
-## Installation
+## Run it locally
 
 ```bash
-cd Customer-Churn-Prediction
 pip install -r requirements.txt
-```
-
-## Configure the LLM (free)
-
-1. Sign up at [console.groq.com](https://console.groq.com) and create an API key (free tier).
-2. Create `.streamlit/secrets.toml` locally (it's gitignored) with:
-   ```toml
-   GROQ_API_KEY = "gsk_your_key"
-   ```
-3. Without a key the Retention Report mode falls back to a rule-based report automatically.
-
-## Running locally
-
-```bash
 streamlit run app.py
 ```
 
-Opens at `http://localhost:8501`.
+The app opens at http://localhost:8501.
 
-## CSV format (Batch + Dashboard)
+## Groq API key (for the Retention Report)
+
+The Retention Report mode uses the Groq free tier. Get a key from
+https://console.groq.com and create a file at `.streamlit/secrets.toml` with:
+
+```toml
+GROQ_API_KEY = "gsk_your_key"
+```
+
+If no key is set, the app still works — it falls back to a simple rule based
+report built from the model's own reasons.
+
+## CSV format for Batch and Dashboard modes
 
 ```csv
 Total Spend,Support Calls,Payment Delay,Contract Length
@@ -44,79 +48,61 @@ Total Spend,Support Calls,Payment Delay,Contract Length
 800.0,1,5,Quarterly
 ```
 
-## Deploy free on Streamlit Community Cloud
+Contract Length must be Monthly, Quarterly or Annual.
 
-1. Push the repo to GitHub.
-2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → pick the repo + `app.py` on `main`.
-3. Under **Advanced settings → Secrets**, paste:
-   ```toml
-   GROQ_API_KEY = "gsk_your_key"
-   ```
-4. Deploy. First build downloads MiniLM + FAISS + torch (~3 min).
+## Deploy on Streamlit Community Cloud
 
-`runtime.txt` pins Python 3.11 for reliable `faiss-cpu` wheels. `packages.txt` is empty (no apt packages needed).
+1. Push the repo to GitHub (already done).
+2. Go to https://share.streamlit.io, click New app, pick this repo and
+   `app.py` on the `main` branch.
+3. Open Advanced settings, go to Secrets and paste
+   `GROQ_API_KEY = "gsk_your_key"`.
+4. Click Deploy. The first build takes a few minutes because it has to
+   download sentence-transformers, FAISS and torch.
 
-## Running the smoke test
+`runtime.txt` pins Python 3.11 so the FAISS wheel installs cleanly.
+`packages.txt` is empty because we do not need any apt packages.
 
-Offline, no API calls:
+## Smoke test
+
+A small test that runs the agent end-to-end with a mocked LLM and retriever.
+No API calls, no network.
 
 ```bash
 python -m tests.smoke_agent
 ```
 
-Tests three customer profiles plus the LLM-unavailable fallback path.
+## Model
 
-## Model Information
+- Random Forest classifier (scikit-learn), trained on the Kaggle telco churn
+  dataset.
+- Hosted on Hugging Face Hub:
+  https://huggingface.co/manthansubhash01/churn-prediction-model
+- Inputs: Total Spend, Support Calls, Payment Delay, Contract Length.
 
-- Model Type: Random Forest Classifier (scikit-learn)
-- Hosted on: [Hugging Face Hub](https://huggingface.co/manthansubhash01/churn-prediction-model)
-- Features: Total Spend, Support Calls, Payment Delay, Contract Length
-
-## Project Structure
+## Folder layout
 
 ```
 Customer-Churn-Prediction/
-├── app.py                       # Streamlit entry point
+├── app.py
 ├── requirements.txt
-├── runtime.txt                  # python-3.11
-├── packages.txt                 # empty (no apt deps)
-├── .streamlit/secrets.toml      # local only, gitignored; holds GROQ_API_KEY
-├── EXPLANATION.md               # detailed walkthrough (viva notes)
+├── runtime.txt
+├── packages.txt
 ├── src/
 │   ├── config.py
-│   ├── model_handler.py         # loads RandomForest from HF
+│   ├── model_handler.py
 │   ├── data_processor.py
-│   ├── predictor.py             # predict_single / predict_batch
+│   ├── predictor.py
 │   ├── ui_components.py
-│   ├── agent/                   # LangGraph agent
-│   │   ├── state.py             # AgentState TypedDict
-│   │   ├── llm.py               # Groq client + chat_json
-│   │   ├── prompts.py
-│   │   ├── nodes.py             # classify_risk, build_query, retrieve, generate, compose, fallback
-│   │   └── graph.py             # compiled StateGraph + run_agent
-│   ├── rag/                     # FAISS retrieval
-│   │   ├── corpus/              # 6 curated markdown playbooks
-│   │   ├── index_store/         # faiss.index + meta.pkl (committed)
-│   │   ├── index.py             # build / load index
-│   │   └── retriever.py         # cached search(query, k)
-│   ├── report/
-│   │   └── pdf.py               # ReportLab PDF builder
-│   └── dashboard/
-│       └── analytics.py         # Plotly dashboard renderer
-├── tests/
-│   └── smoke_agent.py
-└── report_latex/
-    ├── main.tex
-    └── references.bib
+│   ├── agent/         # LangGraph agent (state, nodes, graph, Groq client)
+│   ├── rag/           # corpus + FAISS index + retriever
+│   ├── report/        # PDF builder (reportlab)
+│   └── dashboard/     # batch analytics (plotly)
+└── tests/
+    └── smoke_agent.py
 ```
 
-## Tech Stack
+## Main libraries
 
-- **ML**: scikit-learn, pandas, numpy
-- **LLM**: Groq Llama 3.3 70B (free tier)
-- **Agent**: LangGraph (explicit state machine + conditional fallback)
-- **RAG**: FAISS + sentence-transformers (`all-MiniLM-L6-v2`)
-- **UI**: Streamlit
-- **PDF**: ReportLab
-- **Charts**: Plotly
-- **Hosting**: Streamlit Community Cloud (free)
+scikit-learn, pandas, numpy, streamlit, groq, langgraph, langchain-core,
+sentence-transformers, faiss-cpu, plotly, reportlab, huggingface-hub.
